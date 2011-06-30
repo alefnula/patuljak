@@ -48,6 +48,12 @@ class Database(object):
     def __write_header(self, f, header):
         f.write(struct.pack('3Q', *header))
     
+    def keys(self):
+        return sorted(self.table)
+    
+    def __len__(self):
+        return len(self.table)
+    
     def load(self):
         if not os.path.isfile(self.database):
             with open(self.database, 'wb') as f:
