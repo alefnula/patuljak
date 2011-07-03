@@ -38,7 +38,7 @@ class Database(object):
         self.overwrite = overwrite
     
     def __read_header(self, f):
-        return Header._make(struct.unpack('3Q', f.read(Database.HEADER_SIZE)))
+        return Header._make(struct.unpack('=L3Q', f.read(Database.HEADER_SIZE)))
     
     def __read_doc(self, f, header=None):
         if header is None:
