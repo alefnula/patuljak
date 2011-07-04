@@ -25,7 +25,29 @@ The format that is written for each key/value entry is simple::
   +-----+-----------+---------+--------------+----------+------------+-----+-------+
   | crc | timestamp | version | previous ptr | key size | value size | key | value |
   +-----+-----------+---------+--------------+----------+------------+-----+-------+
-  
+    32        64        64           64           16          64       ...    ...
+
+Filds:
+
+crc
+    32 bit
+    CRC ov the rest of the packet
+
+timestamp
+    64 bit
+    Current timestamp
+
+version
+    64 bit version
+
+previous ptr
+    Pointer to the previous version of this document
+
+key size
+    Size of the key in bytes
+
+value size
+    Size of value in bytes
 
 With each write, a new entry is appended to the active file. Note that deletion
 is simply a write of a special tombstone value. Thus, a ``patuljak`` data file

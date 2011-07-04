@@ -6,16 +6,34 @@ import os
 import struct
 from collections import namedtuple
 
-Header   = namedtuple('Header',   'previous version length')
-Document = namedtuple('Document', 'header key value')
+import utils
 
-def smart_str(s):
-    if isinstance(s, unicode):
-        return s.encode('utf-8')
-    elif isinstance(s, str):
-        return s
-    else:
-        return str(s)
+
+'''
+      <------------------------------ crc coverage ------------------------------>       
++-----+-----------+---------+--------------+----------+------------+-----+-------+
+| crc | timestamp | version | previous ptr | key size | value size | key | value |
++-----+-----------+---------+--------------+----------+------------+-----+-------+
+  32        64        64           64           16          64       ...    ...
+'''
+
+HEADER_SIZE = 304
+STRUCT      = '=L3QHQ'
+Header      = namedtuple('Header',   'crc timestamp version previous key_size value_size')
+Document    = namedtuple('Document', 'header key value')
+
+
+def read_header(f):
+    return Header._make(struct.unpack(STRUCT, f.read(HEADER_SIZE)))
+
+def write_header(f, header):
+    f.write(struct.pack(STRUCT, *header))
+
+def read_doc(f, header=None):
+    if header is None:
+        header = read_header(f)
+    return Document(header, f.read(header.key_size), f.read(header.value_size))
+
 
 class Conflict(Exception):
     def __init__(self, document, tried_version):
@@ -36,17 +54,6 @@ class Database(object):
         self.database  = database
         self.table     = {} if shared_table is None else shared_table
         self.overwrite = overwrite
-    
-    def __read_header(self, f):
-        return Header._make(struct.unpack('=L3Q', f.read(Database.HEADER_SIZE)))
-    
-    def __read_doc(self, f, header=None):
-        if header is None:
-            header = self.__read_header(f)
-        return Document(header, *f.read(header.length).partition('\0')[::2])
-
-    def __write_header(self, f, header):
-        f.write(struct.pack('3Q', *header))
     
     def keys(self):
         return sorted(self.table)
@@ -79,15 +86,15 @@ class Database(object):
                     return self.__read_doc(f, header)
                 while version < header.version and header.previous != 0:
                     f.seek(header.previous)
-                    header = self.__read_header(f)
+                    header = read_header(f)
                 if version != header.version:
                     return None
-                return self.__read_doc(f, header)
+                return read_doc(f, header)
         return None
     
     def write(self, key, value, version=None):
-        key   = smart_str(key)
-        value = smart_str(value)
+        key   = utils.smart_str(key)
+        value = utils.smart_str(value)
         with open(self.database, 'rb+') as f:
             data   = '%s\0%s' % (key, value)
             length = len(data)
@@ -100,7 +107,7 @@ class Database(object):
                 header = Header(previous, header.version+1, length)
             else:
                 header = Header(0, 0, length)
-            self.__write_header(f, header)
+            write_header(f, header)
             f.write(data)
             f.flush()
             self.table[key] = (position, header)
