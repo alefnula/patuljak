@@ -1,0 +1,8 @@
+{
+    "name": "patuljak"
+  , "version": "0.0.1"
+  , "private": true
+  , "dependencies": {
+      "crc": "0.1.x",
+  }
+}
