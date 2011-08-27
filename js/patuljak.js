@@ -1,6 +1,10 @@
 var fs   = require('fs')
   , path = require('path');
 
+
+function noop() {}
+
+
 /*
         <------------------------------ crc coverage ------------------------------>       
   +-----+-----------+---------+--------------+----------+------------+-----+-------+
@@ -56,8 +60,8 @@ Patuljak.prototype.writeHeaders = function writeHeaders(headers, callback) {
     var self = this;
     
     var buffer = new Buffer(self.HEADERS_SIZE);
-    buffer.writeUInt32BE(0, 0);                     // crc
-    buffer.writeUInt32BE(0, 4);                     // timestamp
+    buffer.writeUInt32BE(0,                     0); // crc
+    buffer.writeUInt32BE(headers.timestamp,     4); // timestamp
     buffer.writeUInt32BE(headers.version,       8); // version
     buffer.writeUInt32BE(headers.previous_ptr, 12); // previous ptr
     buffer.writeUInt16BE(headers.key_size,     16); // key size
@@ -86,14 +90,18 @@ Patuljak.prototype.readHeaders = function readHeaders(fd, position, callback) {
 };
 
 
-Patuljak.prototype.get = function get(key, callback) {
-    if (callback === undefined) { return null; }
+Patuljak.prototype.get = function get(key, version, callback) {
+    callback = arguments[arguments.length - 1];
+    if (typeof(callback) !== 'function') {
+        return;
+    }
     
     var self = this;
     
     var headers = self.keyStore[key] || null;
     if (headers === null) {
-        return callback(null);
+        callback(null);
+        return;
     } else {
         fs.open(self.path, 'r', function (err, fd) {
             fs.read(fd, new Buffer(headers.value_size), 0, headers.value_size, headers.position + self.HEADERS_SIZE + headers.key_size, function (err, bytesRead, buffer) {
@@ -105,6 +113,8 @@ Patuljak.prototype.get = function get(key, callback) {
 
 
 Patuljak.prototype.put = function put(key, value, callback) {
+    callback = callback || noop;
+    
     var self = this;
     
     // Setup new headerss
@@ -124,7 +134,7 @@ Patuljak.prototype.put = function put(key, value, callback) {
         var buf = Buffer(key + value);
         fs.write(self.fd, buf, 0, buf.length, self.position, function (err, written, buffer) {
             self.position += buf.length;
-            if (callback) { callback(); }
+            callback();
         });
     });
 }
