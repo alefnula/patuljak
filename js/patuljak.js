@@ -1,243 +1,275 @@
 var fs   = require('fs')
-  , path = require('path');
+  , path = require('path')
+  , Seq  = require('seq');
 
 
 function noop() {}
 
 
 /*
-        <--------------------------------------- crc coverage --------------------------------------->       
-  +-----+-----------+---------+-------------------+--------------+----------+------------+-----+-------+
-  | crc | timestamp | version | previous file ptr | previous ptr | key size | value size | key | value |
-  +-----+-----------+---------+-------------------+--------------+----------+------------+-----+-------+
-    32        32        32              32               32           16          32       ...    ...
+        <-------------------------------------- crc coverage ---------------------------------------->       
+  +-----+-----------+---------+-----------------+--------------+----------+------------+-----+-------+
+  | crc | timestamp | version | previous db ptr | previous ptr | key size | value size | key | value |
+  +-----+-----------+---------+-----------------+--------------+----------+------------+-----+-------+
+    32        32        32            32               32           16          32       ...    ...
 
 */
 
 
-function NotFound() {
-    Error
-}
 
-Patuljak = exports.Patuljak = function Patuljak(database) {
+Patuljak = exports.Patuljak = function Patuljak(root) {
     if (!(this instanceof Patuljak)) {
-        return new Patuljak(database);
+        return new Patuljak(root);
     }
-    this.database = path.normalize(database);
-    this.current_pat = 0;
+    this.root = path.normalize(root);
+    this.db = 0;
     this.fd = null;
-    this.position = 0;
-    this.keyStore = {};
+    this.pos = 0;
+    this.store = {};
 }
 
 
 Patuljak.prototype.keys = function () {
-    return Object.keys(this.keyStore);
+    return Object.keys(this.store);
 }
 
+Patuljak.prototype.version = function (key) {
+    var self = this;
+    
+    var headers = self.store[key];
+    if (headers === undefined) {
+        return null;
+    } else {
+        return headers.version;
+    }
+};
+
 Patuljak.prototype.initialize = function (cb) {
-    self = this;
-    path.exists(self.database, function  (exists) {
+    var self = this;
+    
+    path.exists(self.root, function (exists) {
         if (exists) {
-            fs.readdir(self.database, function (err, files) {
-                if (err) {
-                    cb(err, null);
-                } else {
-                    var pat_files = [];
+            Seq()
+                .seq(function() { fs.readdir(self.root, this); })
+                .seq(function(files) {
+                    var dbs = [];
                     files.forEach(function (file) {
                         if (path.extname(file) === '.pat') {
-                            pat_files.push(parseInt(path.basename(file, '.pat'), 10));
+                            dbs.push(parseInt(path.basename(file, '.pat'), 10));
                         }
                     });
-                    self._load_pats(pat_files.sort(), cb)
-                }
-            });
-            
+                    self._load_dbs(dbs.sort(), cb)
+                })
+                .catch(cb);
         } else {
-            fs.mkdir(self.database, 0755, function (err) {
-                if (err) {
-                    cb(err, null);
-                } else {
-                    fs.open(path.join(self.database, '0.pat'), 'a+', function (err, fd) {
-                        if (err) {
-                            cb(err, null)
-                        } else {
-                            self.fd = fd;
-                            self.position = 0;
-                            cb(null, self);
-                        }
-                    });
-                }
-            });
+            Seq()
+              .seq(function () { fs.mkdir(self.root, 0755, this); })
+              .seq(function () { fs.open(path.join(self.root, self.db + '.pat'), 'a', this); })
+              .seq(function (fd) {
+                  self.fd = fd;
+                  self.pos = 0;
+                  cb(null, self);
+              })
+              .catch(cb);
         }
     })
 };
 
 
-Patuljak.prototype._load_pats = function (pat_files, cb) {
+
+Patuljak.prototype._HEADERS_SIZE = 26;
+
+Patuljak.prototype._load_dbs = function (dbs, cb) {
     var self = this
-      , pat  = pat_files.shift();
-    if (pat === undefined) {
-        fs.open(path.join(self.database, self.current_pat + '.pat'), 'a+', function (err, fd) {
-            if (err) {
-                cb(err, null);
-            } else {
+      , db  = dbs.shift();
+    if (db === undefined) {
+        Seq()
+            .seq(function () {
+                fs.open(path.join(self.root, self.db + '.pat'), 'a', this);
+            })
+            .seq(function (fd) {
                 self.fd = fd;
                 cb(null, self);
-            }
-        });
+            })
+            .catch(cb)
     } else {
-        self.current_pat = pat;
-        var pat_file = path.join(self.database, pat + '.pat');
-        fs.stat(pat_file, function (err, stats) {
-            if (err) {
-                cb(err, null);
-            } else {
-                self.position = stats.size;
-                fs.open(pat_file, 'r', function (err, fd) {
-                    if (err) {
-                        cb(err);
-                    } else {
-                        self._load_pat(pat, fd, 0, function (err) {
-                            if (err) {
-                                cb(err, null);
-                            } else {
-                                self._load_pats(pat_files, cb);
-                            }
-                        });
-                    }
-                });
-                
-            }
-        });
+        self.db = db;
+        var db_file = path.join(self.root, db + '.pat');
+        Seq()
+            .par(function () {
+                fs.stat(db_file, this);
+            })
+            .par(function () {
+                fs.open(db_file, 'r', this);
+            })
+            .seq(function (stats, fd) {
+                self.pos = stats.size;
+                self._load_db(db, fd, 0, this);
+            })
+            .seq(function () {
+                self._load_dbs(dbs, cb);
+            })
+            .catch(cb);
     }
 };
 
 
-Patuljak.prototype._load_pat = function _read(pat, fd, position, cb) {
-    self = this;
-    if (position < self.position) {
-        self.readHeaders(pat, fd, position, function (err, headers) {
-            if (err) {
-                cb(err);
-            } else {
-                position += self.HEADERS_SIZE;
-                fs.read(fd, new Buffer(headers.key_size), 0, headers.key_size, position, function (err, bytesRead, buffer) {
-                    if (err) {
-                        cb(err);
-                    } else {
-                        self.keyStore[buffer.toString('utf8')] = headers;
-                        position += (headers.key_size + headers.value_size);
-                        self._load_pat(pat, fd, position, cb);                    
-                    }
-                });                
-            }
-        });
+Patuljak.prototype._load_db = function (db, fd, pos, cb) {
+    var self = this;
+    
+    if (pos < self.pos) {
+        var headers = null;
+        Seq()
+            .seq(function () { self._read_headers(db, fd, pos, this); })
+            .seq(function (hdrs) {
+                headers = hdrs;
+                fs.read(fd, new Buffer(headers.key_size), 0, headers.key_size, pos + self._HEADERS_SIZE, this);
+            })
+            .seq(function (bytesRead, buffer) {
+                self.store[buffer.toString('utf8')] = headers;
+                self._load_db(db, fd, pos + self._HEADERS_SIZE + headers.key_size + headers.value_size, cb);
+            })
+            .catch(cb);
     } else {
         cb(null);
     }
 }
 
 
-Patuljak.prototype.HEADERS_SIZE = 26;
-
-Patuljak.prototype.writeHeaders = function writeHeaders(headers, callback) {
+Patuljak.prototype._read_headers = function (db, fd, pos, cb) {
     var self = this;
     
-    var buffer = new Buffer(self.HEADERS_SIZE);
-    buffer.writeUInt32BE(0,                          0); // crc
-    buffer.writeUInt32BE(0                ,          4); // timestamp
-    buffer.writeUInt32BE(headers.version,            8); // version
-    buffer.writeUInt32BE(headers.previous_file_ptr, 12); // previous file ptr
-    buffer.writeUInt32BE(headers.previous_ptr,      16); // previous ptr
-    buffer.writeUInt16BE(headers.key_size,          20); // key size
-    buffer.writeUInt32BE(headers.value_size,        22); // value size
-    
-    headers.position = self.position;
-    fs.write(self.fd, buffer, 0, self.HEADERS_SIZE, self.position, function (err, written, buffer) {
-        self.position += self.HEADERS_SIZE;
-        if (callback) { callback(headers); };
-    });
-};
-
-Patuljak.prototype.readHeaders = function readHeaders(pat, fd, position, cb) {
-    fs.read(fd, new Buffer(this.HEADERS_SIZE), 0, this.HEADERS_SIZE, position, function (err, bytesRead, buffer) {
+    fs.read(fd, new Buffer(self._HEADERS_SIZE), 0, self._HEADERS_SIZE, pos, function (err, bytesRead, buffer) {
         if (err) {
-            cb(err, null);
+            cb(err);
         } else {
             var crc = buffer.readUInt32BE(0)
               , headers = {
-                'position'          : position,
-                'pat'               : pat,
-                'timestamp'         : buffer.readUInt32BE(4),
-                'version'           : buffer.readUInt32BE(8),
-                'previous_file_ptr' : buffer.readUInt32BE(12),
-                'previous_ptr'      : buffer.readUInt32BE(16),
-                'key_size'          : buffer.readUInt16BE(20),
-                'value_size'        : buffer.readUInt32BE(22)
+                pos        : pos,
+                db         : db,
+                timestamp  : buffer.readUInt32BE(4),
+                version    : buffer.readUInt32BE(8),
+                prev_db    : buffer.readUInt32BE(12),
+                prev_pos   : buffer.readUInt32BE(16),
+                key_size   : buffer.readUInt16BE(20),
+                value_size : buffer.readUInt32BE(22)
             };
-            cb(null, headers);            
+            cb(null, headers);
         }
     });
 };
 
 
-Patuljak.prototype.bget = function bget(key, version, callback) {
-    callback = arguments[arguments.length - 1];
-    if (typeof(callback) !== 'function') {
-        return;
-    }
+Patuljak.prototype._write_headers = function (headers, cb) {
     var self = this;
     
-    var headers = self.keyStore[key] || null;
-    if (headers === null) {
-        callback(new Error('Key not found'), null);
-    } else {
-        fs.open(self.path, 'r', function (err, fd) {
-            fs.read(fd, new Buffer(headers.value_size), 0, headers.value_size, headers.position + self.HEADERS_SIZE + headers.key_size, function (err, bytesRead, buffer) {
-                if (err) {
-                    callback(err, null);
-                }
-                callback(buffer);
-            });    
-        });
-    }
-}
-
-Patuljak.prototype.get = function get(key, version, callback) {
-    callback = arguments[arguments.length - 1];
-    if (typeof(callback) !== 'function') {
-        return;
-    }
+    var buffer = new Buffer(self._HEADERS_SIZE);
+    buffer.writeUInt32BE(0,                   0); // crc
+    buffer.writeUInt32BE(0,                   4); // timestamp
+    buffer.writeUInt32BE(headers.version,     8); // version
+    buffer.writeUInt32BE(headers.prev_db,    12); // previous file ptr
+    buffer.writeUInt32BE(headers.prev_pos,   16); // previous ptr
+    buffer.writeUInt16BE(headers.key_size,   20); // key size
+    buffer.writeUInt32BE(headers.value_size, 22); // value size
     
-    
+    headers.db  = self.db;
+    headers.pos = self.pos;
+    Seq()
+        .seq(function () {
+            fs.write(self.fd, buffer, 0, self._HEADERS_SIZE, self.pos, this);
+        })
+        .seq(function (written, buffer) {
+            self.pos += self._HEADERS_SIZE;
+            fs.fsync(self.fd, this);
+        })
+        .seq(function () {
+            cb(null, headers);
+        })
+        .catch(cb);
 };
 
 
-Patuljak.prototype.put = function put(key, value, callback) {
-    callback = callback || noop;
+
+Patuljak.prototype.sget = function (key, cb) {
+    var self = this;
+    
+    //cb = arguments[arguments.length - 1];
+    if (typeof(cb) !== 'function') {
+        return;
+    }
+    
+    var headers = self.store[key];
+    if (headers === undefined) {
+        cb(new Error('Not found'));
+    } else {
+        Seq()
+            .seq(function () {
+                fs.open(path.join(self.root, headers.db + '.pat'), 'r', this);
+            })
+            .seq(function (fd) {
+                fs.read(fd, new Buffer(headers.value_size), 0, headers.value_size,
+                        headers.pos + self._HEADERS_SIZE + headers.key_size, this);
+            })
+            .seq(function (bytesRead, buffer) {
+                cb(null, buffer.toString());
+            })
+            .catch(cb);
+    }
+}
+
+Patuljak.prototype.get = function (key, cb) {
+    var self = this;
+    self.sget(key, function (err, str) {
+        if (err) {
+            cb(err);
+        } else {
+            try {
+                cb(null, JSON.parse(str));    
+            } catch (err) {
+                cb(err);
+            }    
+        }
+    });
+};
+
+
+Patuljak.prototype.sput = function (key, value, cb) {
+    cb = cb || noop;
     
     var self = this;
     
     // Setup new headerss
-    var headers = self.keyStore[key];
+    var headers = self.store[key];
     if (headers === undefined) {
-        headers = {'version': 0, 'previous_file_ptr': 0, 'previous_ptr': 0 };
+        headers = {
+            version  : 0,
+            prev_db  : 0,
+            prev_pos : 0
+        };
     } else {
         headers.version += 1;
-        headers.previous_file_ptr = headers.pat;
-        headers.previous_ptr      = headers.position;
+        headers.prev_db  = headers.db;
+        headers.prev_pos = headers.pos;
     }
     headers.timestamp  = Date.now();
-    headers.key_size   = Buffer.byteLength(key, 'utf8');
+    headers.key_size   = Buffer.byteLength(key,   'utf8');
     headers.value_size = Buffer.byteLength(value, 'utf8');
-    
-    self.writeHeaders(headers, function (headers) {
-        self.keyStore[key] = headers;
-        var buf = Buffer(key + value);
-        fs.write(self.fd, buf, 0, buf.length, self.position, function (err, written, buffer) {
-            self.position += buf.length;
-            callback();
-        });
-    });
+    Seq()
+        .seq(function () {
+            self._write_headers(headers, this);
+        })
+        .seq(function (headers) {
+            self.store[key] = headers;
+            var buf = Buffer(key + value);
+            fs.write(self.fd, buf, 0, buf.length, self.pos, this);
+        })
+        .seq(function (written, buffer) {
+            self.pos += buffer.length;
+            cb(null);
+        })
+        .catch(cb);
 }
+
+Patuljak.prototype.put = function (key, value, cb) {
+    this.sput(key, JSON.stringify(value), cb);
+};

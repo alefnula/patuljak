@@ -1,20 +1,28 @@
 var fs       = require('fs')
+  , Seq      = require('seq')
   , patuljak = require('./patuljak');
 
-patuljak.Patuljak('db').initialize(function (err, p) {
-    if (err) {
-        console.log(err);
-        return;
-    }
-    console.log('inicijalizovao');
-    console.log(p.keys());
-    p.put('nesto', 'sasvim drugacije', function () {
-        console.log(p.keyStore);
-        p.get('key', function (value) {
-            console.log('Dobio: ' + value);
-            p.get('nesto', function (value) {
-                console.log('Dobio: ' + value);
-            });
-        });
+var p;
+
+Seq()
+    .seq(function () {
+        patuljak.Patuljak('db').initialize(this);
+    })
+    .seq(function (patuljak) {
+        p = patuljak;
+        p.put('nesto', {test: 'best'}, this);    
+    })
+    .seq(function () {
+        console.log(p.version('nesto'));
+        p.get('nesto', this);
+    })
+    .seq(function (value) {
+        console.log(value);
+        p.get('key', this);
+    })
+    .seq(function (value) {
+        console.log('value');
+    })
+    .catch(function (e) {
+        console.log(e.message);
     });
-})
