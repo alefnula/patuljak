@@ -15,8 +15,13 @@ function noop() {}
 
 */
 
+/* Constants */
+var HEADERS_SIZE = 26;
+var MAX_DB_SIZE  = Math.pow(2, 32) - 1;
 
 
+
+/* Patuljak db implementation */
 Patuljak = exports.Patuljak = function Patuljak(root) {
     if (!(this instanceof Patuljak)) {
         return new Patuljak(root);
@@ -76,9 +81,6 @@ Patuljak.prototype.initialize = function (cb) {
 };
 
 
-
-Patuljak.prototype._HEADERS_SIZE = 26;
-
 Patuljak.prototype._load_dbs = function (dbs, cb) {
     var self = this
       , db  = dbs.shift();
@@ -123,11 +125,11 @@ Patuljak.prototype._load_db = function (db, fd, pos, cb) {
             .seq(function () { self._read_headers(db, fd, pos, this); })
             .seq(function (hdrs) {
                 headers = hdrs;
-                fs.read(fd, new Buffer(headers.key_size), 0, headers.key_size, pos + self._HEADERS_SIZE, this);
+                fs.read(fd, new Buffer(headers.key_size), 0, headers.key_size, pos + HEADERS_SIZE, this);
             })
             .seq(function (bytesRead, buffer) {
                 self.store[buffer.toString('utf8')] = headers;
-                self._load_db(db, fd, pos + self._HEADERS_SIZE + headers.key_size + headers.value_size, cb);
+                self._load_db(db, fd, pos + HEADERS_SIZE + headers.key_size + headers.value_size, cb);
             })
             .catch(cb);
     } else {
@@ -139,7 +141,7 @@ Patuljak.prototype._load_db = function (db, fd, pos, cb) {
 Patuljak.prototype._read_headers = function (db, fd, pos, cb) {
     var self = this;
     
-    fs.read(fd, new Buffer(self._HEADERS_SIZE), 0, self._HEADERS_SIZE, pos, function (err, bytesRead, buffer) {
+    fs.read(fd, new Buffer(HEADERS_SIZE), 0, HEADERS_SIZE, pos, function (err, bytesRead, buffer) {
         if (err) {
             cb(err);
         } else {
@@ -160,10 +162,10 @@ Patuljak.prototype._read_headers = function (db, fd, pos, cb) {
 };
 
 
-Patuljak.prototype._write_headers = function (headers, cb) {
+Patuljak.prototype._write = function (headers, data, cb) {
     var self = this;
     
-    var buffer = new Buffer(self._HEADERS_SIZE);
+    var buffer = new Buffer(HEADERS_SIZE);
     buffer.writeUInt32BE(0,                   0); // crc
     buffer.writeUInt32BE(0,                   4); // timestamp
     buffer.writeUInt32BE(headers.version,     8); // version
@@ -172,14 +174,31 @@ Patuljak.prototype._write_headers = function (headers, cb) {
     buffer.writeUInt16BE(headers.key_size,   20); // key size
     buffer.writeUInt32BE(headers.value_size, 22); // value size
     
-    headers.db  = self.db;
-    headers.pos = self.pos;
     Seq()
         .seq(function () {
-            fs.write(self.fd, buffer, 0, self._HEADERS_SIZE, self.pos, this);
+            if (self.pos + HEADERS_SIZE + data.length > MAX_DB_SIZE) {
+                self.db += 1;
+                self.pos = 0;
+                fs.open(path.join(self.root, self.db + '.pat'), 'a', this);
+            } else {
+                this(null);
+            }
+        })
+        .seq(function (fd) {
+            if (fd !== undefined) {
+                self.fd = fd;
+            }
+            headers.db  = self.db;
+            headers.pos = self.pos;
+            
+            fs.write(self.fd, buffer, 0, HEADERS_SIZE, self.pos, this);
         })
         .seq(function (written, buffer) {
-            self.pos += self._HEADERS_SIZE;
+            self.pos += HEADERS_SIZE;
+            fs.write(self.fd, data, 0, data.length, self.pos, this)
+        })
+        .seq(function (written, buffer) {
+            self.pos += data.length;
             fs.fsync(self.fd, this);
         })
         .seq(function () {
@@ -208,7 +227,7 @@ Patuljak.prototype.sget = function (key, cb) {
             })
             .seq(function (fd) {
                 fs.read(fd, new Buffer(headers.value_size), 0, headers.value_size,
-                        headers.pos + self._HEADERS_SIZE + headers.key_size, this);
+                        headers.pos + HEADERS_SIZE + headers.key_size, this);
             })
             .seq(function (bytesRead, buffer) {
                 cb(null, buffer.toString());
@@ -256,15 +275,10 @@ Patuljak.prototype.sput = function (key, value, cb) {
     headers.value_size = Buffer.byteLength(value, 'utf8');
     Seq()
         .seq(function () {
-            self._write_headers(headers, this);
+            self._write(headers, Buffer(key + value), this);
         })
         .seq(function (headers) {
             self.store[key] = headers;
-            var buf = Buffer(key + value);
-            fs.write(self.fd, buf, 0, buf.length, self.pos, this);
-        })
-        .seq(function (written, buffer) {
-            self.pos += buffer.length;
             cb(null);
         })
         .catch(cb);
