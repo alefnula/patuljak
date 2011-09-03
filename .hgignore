@@ -4,5 +4,5 @@ syntax: glob
 .settings
 *.pyc
 docs/_build
-*.db
+*.pat
 node_modules

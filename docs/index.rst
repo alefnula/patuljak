@@ -21,11 +21,11 @@ writes do not require disk seeking.
 
 The format that is written for each key/value entry is simple::
  
-        <------------------------------ crc coverage ------------------------------>       
-  +-----+-----------+---------+--------------+----------+------------+-----+-------+
-  | crc | timestamp | version | previous ptr | key size | value size | key | value |
-  +-----+-----------+---------+--------------+----------+------------+-----+-------+
-    32        64        64           64           16          64       ...    ...
+        <--------------------------------------- crc coverage --------------------------------------->       
+  +-----+-----------+---------+-------------------+--------------+----------+------------+-----+-------+
+  | crc | timestamp | version | previous file ptr | previous ptr | key size | value size | key | value |
+  +-----+-----------+---------+-------------------+--------------+----------+------------+-----+-------+
+    32        32        32              32               32           16          32       ...    ...
 
 Filds:
 
@@ -34,11 +34,14 @@ crc
     CRC ov the rest of the packet
 
 timestamp
-    64 bit
+    32 bit
     Current timestamp
 
 version
-    64 bit version
+    32 bit version
+
+previous file ptr
+    Pointer to the file in which the previous version of this document is stored
 
 previous ptr
     Pointer to the previous version of this document

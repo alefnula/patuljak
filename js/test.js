@@ -1,9 +1,13 @@
 var fs       = require('fs')
   , patuljak = require('./patuljak');
 
-p = patuljak.Patuljak('db.db');
-p.initialize(function () {
+patuljak.Patuljak('db').initialize(function (err, p) {
+    if (err) {
+        console.log(err);
+        return;
+    }
     console.log('inicijalizovao');
+    console.log(p.keys());
     p.put('nesto', 'sasvim drugacije', function () {
         console.log(p.keyStore);
         p.get('key', function (value) {
@@ -14,8 +18,3 @@ p.initialize(function () {
         });
     });
 })
-
-
-process.on('uncaughtException', function (err) {
-  console.log('Caught exception: ' + err);
-});
