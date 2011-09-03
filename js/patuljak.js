@@ -174,23 +174,11 @@ Patuljak.prototype._write = function (headers, data, cb) {
     buffer.writeUInt16BE(headers.key_size,   20); // key size
     buffer.writeUInt32BE(headers.value_size, 22); // value size
     
-    Seq()
-        .seq(function () {
-            if (self.pos + HEADERS_SIZE + data.length > MAX_DB_SIZE) {
-                self.db += 1;
-                self.pos = 0;
-                fs.open(path.join(self.root, self.db + '.pat'), 'a', this);
-            } else {
-                this(null);
-            }
-        })
-        .seq(function (fd) {
-            if (fd !== undefined) {
-                self.fd = fd;
-            }
-            headers.db  = self.db;
-            headers.pos = self.pos;
+    headers.db  = self.db;
+    headers.pos = self.pos;
             
+    Seq()
+        .seq(function (fd) {
             fs.write(self.fd, buffer, 0, HEADERS_SIZE, self.pos, this);
         })
         .seq(function (written, buffer) {
@@ -199,9 +187,19 @@ Patuljak.prototype._write = function (headers, data, cb) {
         })
         .seq(function (written, buffer) {
             self.pos += data.length;
-            fs.fsync(self.fd, this);
+            // Rotate if max file size exceeded
+            if (self.pos > MAX_DB_SIZE) {
+                self.db += 1;
+                self.pos = 0;
+                fs.open(path.join(self.root, self.db + '.pat'), 'a', this);
+            } else {
+                this(null)
+            }
         })
-        .seq(function () {
+        .seq(function (fd) {
+            if (fd !== undefined) {
+                self.fd = fd;
+            }
             cb(null, headers);
         })
         .catch(cb);
