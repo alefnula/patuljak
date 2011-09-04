@@ -1,6 +1,7 @@
 var fs   = require('fs')
   , path = require('path')
-  , Seq  = require('seq');
+  , Seq  = require('seq')
+  , crc  = require('./lib/crc');
 
 
 function noop() {}
@@ -11,12 +12,12 @@ function noop() {}
   +-----+-----------+---------+-----------------+--------------+----------+------------+-----+-------+
   | crc | timestamp | version | previous db ptr | previous ptr | key size | value size | key | value |
   +-----+-----------+---------+-----------------+--------------+----------+------------+-----+-------+
-    32        32        32            32               32           16          32       ...    ...
+    32        64        32            32               32           16          32       ...    ...
 
 */
 
 /* Constants */
-var HEADERS_SIZE = 26;
+var HEADERS_SIZE = 30;
 var MAX_DB_SIZE  = Math.pow(2, 32) - 1;
 
 
@@ -149,12 +150,12 @@ Patuljak.prototype._read_headers = function (db, fd, pos, cb) {
               , headers = {
                 pos        : pos,
                 db         : db,
-                timestamp  : buffer.readUInt32BE(4),
-                version    : buffer.readUInt32BE(8),
-                prev_db    : buffer.readUInt32BE(12),
-                prev_pos   : buffer.readUInt32BE(16),
-                key_size   : buffer.readUInt16BE(20),
-                value_size : buffer.readUInt32BE(22)
+                timestamp  : buffer.readDoubleBE(4),
+                version    : buffer.readUInt32BE(12),
+                prev_db    : buffer.readUInt32BE(16),
+                prev_pos   : buffer.readUInt32BE(20),
+                key_size   : buffer.readUInt16BE(24),
+                value_size : buffer.readUInt32BE(26)
             };
             cb(null, headers);
         }
@@ -165,28 +166,24 @@ Patuljak.prototype._read_headers = function (db, fd, pos, cb) {
 Patuljak.prototype._write = function (headers, data, cb) {
     var self = this;
     
-    var buffer = new Buffer(HEADERS_SIZE);
-    buffer.writeUInt32BE(0,                   0); // crc
-    buffer.writeUInt32BE(0,                   4); // timestamp
-    buffer.writeUInt32BE(headers.version,     8); // version
-    buffer.writeUInt32BE(headers.prev_db,    12); // previous file ptr
-    buffer.writeUInt32BE(headers.prev_pos,   16); // previous ptr
-    buffer.writeUInt16BE(headers.key_size,   20); // key size
-    buffer.writeUInt32BE(headers.value_size, 22); // value size
+    var buffer = new Buffer(HEADERS_SIZE + data.length);
     
-    headers.db  = self.db;
-    headers.pos = self.pos;
+    buffer.writeDoubleBE(headers.timestamp,   4); // timestamp
+    buffer.writeUInt32BE(headers.version,    12); // version
+    buffer.writeUInt32BE(headers.prev_db,    16); // previous file ptr
+    buffer.writeUInt32BE(headers.prev_pos,   20); // previous ptr
+    buffer.writeUInt16BE(headers.key_size,   24); // key size
+    buffer.writeUInt32BE(headers.value_size, 26); // value size
+    data.copy(buffer, 30)
+    // Calculate CRC32
+    buffer.writeInt32BE(crc.crc32(buffer.slice(4)), 0);
             
     Seq()
         .seq(function (fd) {
-            fs.write(self.fd, buffer, 0, HEADERS_SIZE, self.pos, this);
+            fs.write(self.fd, buffer, 0, buffer.length, self.pos, this);
         })
         .seq(function (written, buffer) {
-            self.pos += HEADERS_SIZE;
-            fs.write(self.fd, data, 0, data.length, self.pos, this)
-        })
-        .seq(function (written, buffer) {
-            self.pos += data.length;
+            self.pos += buffer.length;
             // Rotate if max file size exceeded
             if (self.pos > MAX_DB_SIZE) {
                 self.db += 1;
@@ -322,6 +319,8 @@ Patuljak.prototype.sput = function (key, value, cb) {
     headers.timestamp  = Date.now();
     headers.key_size   = Buffer.byteLength(key,   'utf8');
     headers.value_size = Buffer.byteLength(value, 'utf8');
+    headers.db         = self.db;
+    headers.pos        = self.pos;
     Seq()
         .seq(function () {
             self._write(headers, Buffer(key + value), this);

@@ -25,7 +25,7 @@ The format that is written for each key/value entry is simple::
   +-----+-----------+---------+-------------------+--------------+----------+------------+-----+-------+
   | crc | timestamp | version | previous file ptr | previous ptr | key size | value size | key | value |
   +-----+-----------+---------+-------------------+--------------+----------+------------+-----+-------+
-    32        32        32              32               32           16          32       ...    ...
+    32        64        32              32               32           16          32       ...    ...
 
 Filds:
 
@@ -34,7 +34,7 @@ crc
     CRC ov the rest of the packet
 
 timestamp
-    32 bit
+    64 bit
     Current timestamp
 
 version
