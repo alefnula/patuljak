@@ -10,7 +10,19 @@ Seq()
     })
     .seq(function (patuljak) {
         p = patuljak;
-        p.put('nesto', {test: 'best'}, this);    
+        p.put('nesto', {test: 'verzija 0'}, this);
+    })
+    .seq(function () {
+        p.put('nesto', {test: 'verzija 1'}, this);
+    })
+    .seq(function () {
+        p.put('nesto', {test: 'verzija 2'}, this);
+    })
+    .seq(function () {
+        p.put('nesto', {test: 'verzija 3'}, this);
+    })
+    .seq(function () {
+        p.put('nesto', {test: 'verzija 4'}, this);
     })
     .seq(function () {
         console.log(p.version('nesto'));
@@ -18,10 +30,15 @@ Seq()
     })
     .seq(function (value) {
         console.log(value);
-        p.get('key', this);
+        p.get('nesto', 2, this);
     })
     .seq(function (value) {
-        console.log('value');
+        console.log(value);
+        p.get('nesto', 0, this);
+    })
+    .seq(function (value) {
+        console.log(value);
+        p.get('nesto', '30', this);
     })
     .catch(function (e) {
         console.log(e.message);

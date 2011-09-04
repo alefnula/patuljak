@@ -206,37 +206,88 @@ Patuljak.prototype._write = function (headers, data, cb) {
 };
 
 
-
-Patuljak.prototype.sget = function (key, cb) {
+Patuljak.prototype._get_version = function (version, headers, cb) {
     var self = this;
     
-    //cb = arguments[arguments.length - 1];
+    if (version < headers.version) {
+        Seq()
+            .seq(function () {
+                fs.open(path.join(self.root, headers.prev_db + '.pat'), 'r', this);
+            })
+            .seq(function (fd) {
+                current_fd = fd;
+                self._read_headers(headers.prev_db, fd, headers.prev_pos, this);
+            })
+            .seq(function (new_headers) {
+                self._get_version(version, new_headers, cb);
+            })
+            .catch(cb)
+    } else if (version == headers.version) {
+        cb(null, headers);
+    } else {
+        cb(new Error('Versioning error! Searched version: ' + version + ', Current version: ' + headers.version));
+    }
+};
+
+Patuljak.prototype.sget = function (key, version, cb) {
+    var self = this;
+    
+    cb = arguments[arguments.length - 1];
     if (typeof(cb) !== 'function') {
         return;
+    }
+    if (version === cb) {
+        version = null;
     }
     
     var headers = self.store[key];
     if (headers === undefined) {
         cb(new Error('Not found'));
     } else {
-        Seq()
-            .seq(function () {
-                fs.open(path.join(self.root, headers.db + '.pat'), 'r', this);
-            })
-            .seq(function (fd) {
-                fs.read(fd, new Buffer(headers.value_size), 0, headers.value_size,
-                        headers.pos + HEADERS_SIZE + headers.key_size, this);
-            })
-            .seq(function (bytesRead, buffer) {
-                cb(null, buffer.toString());
-            })
-            .catch(cb);
+        if (version === null) {
+            version = headers.version;
+        }
+        /* Version checking */
+        if (typeof(version) !== 'number') {
+            cb(new Error('Invalid version (version must be a number)'));
+        } else if (Math.floor(version) !== version) {
+            cb(new Error('Invalid version: ' + version));
+        } else if (version > headers.version || version < 0) {
+            cb(new Error('Invalid Version: ' + version + ' Last Version: ' + headers.version));
+        /* Version is valid */
+        } else {
+            Seq()
+                .seq(function () {
+                    self._get_version(version, headers, this);
+                })
+                .seq(function (new_headers) {
+                    headers = new_headers;
+                    fs.open(path.join(self.root, headers.db + '.pat'), 'r', this);
+                })
+                .seq(function (fd) {
+                    fs.read(fd, new Buffer(headers.value_size), 0, headers.value_size,
+                            headers.pos + HEADERS_SIZE + headers.key_size, this);
+                })
+                .seq(function (bytesRead, buffer) {
+                    cb(null, buffer.toString());
+                })
+                .catch(cb);
+        }
     }
 }
 
-Patuljak.prototype.get = function (key, cb) {
+Patuljak.prototype.get = function (key, version, cb) {
     var self = this;
-    self.sget(key, function (err, str) {
+    
+    cb = arguments[arguments.length - 1];
+    if (typeof(cb) !== 'function') {
+        return;
+    }
+    if (version === cb) {
+        version = null;
+    }
+    
+    self.sget(key, version, function (err, str) {
         if (err) {
             cb(err);
         } else {
