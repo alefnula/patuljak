@@ -34,53 +34,7 @@ Patuljak = exports.Patuljak = function Patuljak(root) {
     this.store = {};
 }
 
-
-Patuljak.prototype.keys = function () {
-    return Object.keys(this.store);
-}
-
-Patuljak.prototype.version = function (key) {
-    var self = this;
-    
-    var headers = self.store[key];
-    if (headers === undefined) {
-        return null;
-    } else {
-        return headers.version;
-    }
-};
-
-Patuljak.prototype.initialize = function (cb) {
-    var self = this;
-    
-    path.exists(self.root, function (exists) {
-        if (exists) {
-            Seq()
-                .seq(function() { fs.readdir(self.root, this); })
-                .seq(function(files) {
-                    var dbs = [];
-                    files.forEach(function (file) {
-                        if (path.extname(file) === '.pat') {
-                            dbs.push(parseInt(path.basename(file, '.pat'), 10));
-                        }
-                    });
-                    self._load_dbs(dbs.sort(), cb)
-                })
-                .catch(cb);
-        } else {
-            Seq()
-              .seq(function () { fs.mkdir(self.root, 0755, this); })
-              .seq(function () { fs.open(path.join(self.root, self.db + '.pat'), 'a', this); })
-              .seq(function (fd) {
-                  self.fd = fd;
-                  self.pos = 0;
-                  cb(null, self);
-              })
-              .catch(cb);
-        }
-    })
-};
-
+/* Private metods */
 
 Patuljak.prototype._load_dbs = function (dbs, cb) {
     var self = this
@@ -225,6 +179,57 @@ Patuljak.prototype._get_version = function (version, headers, cb) {
         cb(new Error('Versioning error! Searched version: ' + version + ', Current version: ' + headers.version));
     }
 };
+
+
+/* Public methods */
+Patuljak.prototype.keys = function () {
+    return Object.keys(this.store);
+}
+
+Patuljak.prototype.version = function (key) {
+    var self = this;
+    
+    var headers = self.store[key];
+    if (headers === undefined) {
+        return null;
+    } else {
+        return headers.version;
+    }
+};
+
+Patuljak.prototype.initialize = function (cb) {
+    var self = this;
+    
+    cb = cb || noop;
+    
+    path.exists(self.root, function (exists) {
+        if (exists) {
+            Seq()
+                .seq(function() { fs.readdir(self.root, this); })
+                .seq(function(files) {
+                    var dbs = [];
+                    files.forEach(function (file) {
+                        if (path.extname(file) === '.pat') {
+                            dbs.push(parseInt(path.basename(file, '.pat'), 10));
+                        }
+                    });
+                    self._load_dbs(dbs.sort(), cb)
+                })
+                .catch(cb);
+        } else {
+            Seq()
+              .seq(function () { fs.mkdir(self.root, 0755, this); })
+              .seq(function () { fs.open(path.join(self.root, self.db + '.pat'), 'a', this); })
+              .seq(function (fd) {
+                  self.fd = fd;
+                  self.pos = 0;
+                  cb(null, self);
+              })
+              .catch(cb);
+        }
+    })
+};
+
 
 Patuljak.prototype.sget = function (key, version, cb) {
     var self = this;

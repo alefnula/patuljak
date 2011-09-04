@@ -5,4 +5,5 @@
   , "dependencies": {
       "seq": "0.3.x"
   }
+  , "main": "./patuljak.js"
 }
