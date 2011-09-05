@@ -1,7 +1,8 @@
-var fs   = require('fs')
-  , path = require('path')
-  , Seq  = require('seq')
-  , crc  = require('./lib/crc');
+var fs       = require('fs')
+  , path     = require('path')
+  , Seq      = require('seq')
+  , jsondate = require('./lib/jsondate')
+  , crc      = require('./lib/crc');
 
 
 function noop() {}

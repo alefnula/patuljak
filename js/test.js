@@ -10,19 +10,19 @@ Seq()
     })
     .seq(function (patuljak) {
         p = patuljak;
-        p.put('nesto', {test: 'verzija 0'}, this);
+        p.put('nesto', {test: 'verzija 0', date: new Date()}, this);
     })
     .seq(function () {
-        p.put('nesto', {test: 'verzija 1'}, this);
+        p.put('nesto', {test: 'verzija 1', date: new Date()}, this);
     })
     .seq(function () {
-        p.put('nesto', {test: 'verzija 2'}, this);
+        p.put('nesto', {test: 'verzija 2', date: new Date()}, this);
     })
     .seq(function () {
-        p.put('nesto', {test: 'verzija 3'}, this);
+        p.put('nesto', {test: 'verzija 3', date: new Date()}, this);
     })
     .seq(function () {
-        p.put('nesto', {test: 'verzija 4'}, this);
+        p.put('nesto', {test: 'verzija 4', date: new Date()}, this);
     })
     .seq(function () {
         console.log(p.version('nesto'));
